@@ -19,6 +19,10 @@ ROS2 + Nav2環境で動作する多機能ナビゲーションノードです。
 - **エラーハンドリング**: リトライ機能と詳細なステータス通知
 
 **使用方法:**
+
+nav2環境は高木大先輩のnavgation_utilityのリポジトリで動かしてください。
+https://github.com/TKDRYU104/navigation_utility
+
 ```bash
 # target_navノードを起動
 ros2 launch target_nav target_nav.launch.py
