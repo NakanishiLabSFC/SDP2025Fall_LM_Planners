@@ -13,4 +13,4 @@ objects:
     frame_id: map
     x: 0.4557
     y: 0.4359
-    yaw: 0.00
+    yaw: -1.57

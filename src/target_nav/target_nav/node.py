@@ -71,7 +71,7 @@ class TargetNavNode(Node):
         # Create robot command subscriber
         self.command_sub = self.create_subscription(
             String,
-            '/robot_command',
+            '/robot_command_input',
             self.on_robot_command_callback,
             10,
             callback_group=callback_group
