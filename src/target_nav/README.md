@@ -19,8 +19,9 @@ ROS2 + Nav2環境で動作するナビゲーションノードパッケージで
 
 ## インストール・ビルド
 
-#先に以下navigation_utilityを入れてください。
+### 先に以下navigation_utilityを入れてください。
 https://github.com/TKDRYU104/navigation_utility
+
 
 ```bash
 # ワークスペースのsrcディレクトリにクローン
