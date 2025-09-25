@@ -39,11 +39,24 @@ source install/setup.bash
 
 ### 1. 起動
 
+
+
 ```bash
 # Nav2を先に起動
-ros2 launch nav2_bringup bringup_launch.py map:=/path/to/your/map.yaml
+cd navigation_utility
+source install/setup.bash
+export ROS_DOMAIN_ID=30
+ros2 launch src/nav2_bringup/launch/bringup_launch.py map:=src/nav2_bringup/maps/sdp20250925_map.yaml
+
+#rviz2も先に起動
+cd navigation_utility
+source install/setup.bash
+export ROS_DOMAIN_ID=30
+ros2 run rviz2 rviz2 -d $(ros2 pkg prefix nav2_bringup)/share/nav2_bringup/rviz/nav2_default_view.rviz
 
 # target_navノードを起動
+source install/setup.bash
+export ROS_DOMAIN_ID=30
 ros2 launch target_nav target_nav.launch.py
 ```
 
