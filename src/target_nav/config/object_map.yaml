@@ -1,8 +1,8 @@
 objects:
   "ミャクミャクの椅子":
     frame_id: map
-    x: -0.4068
-    y: 0.0938
+    x: -0.4616
+    y: -0.1336
     yaw: 1.57
   "抹茶の箱":
     frame_id: map

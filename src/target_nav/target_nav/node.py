@@ -77,13 +77,29 @@ class TargetNavNode(Node):
             callback_group=callback_group
         )
         
-        # Create result publisher
+        # Create sequence subscriber
+        self.sequence_sub = self.create_subscription(
+            String,
+            '/robot_command_sequence',
+            self.on_sequence_callback,
+            10,
+            callback_group=callback_group
+        )
+        
+        # Create result publishers
         self.result_pub = self.create_publisher(String, '/nav_result', 10)
+        self.sequence_status_pub = self.create_publisher(String, '/sequence_status', 10)
         
         # Track current navigation state
         self.current_goal_handle = None
         self.retry_count = 0
         self.current_tag = ""
+        
+        # Sequence management state
+        self.action_queue = []
+        self.current_action_index = 0
+        self.sequence_active = False
+        self.sequence_id = 0
         
         self.get_logger().info(f'Target navigation node initialized')
         self.get_logger().info(f'Loaded {len(self.objects)} objects from {self.object_map_path}')
@@ -341,16 +357,24 @@ class TargetNavNode(Node):
         
         if self.retry_count <= self.max_retries:
             self.get_logger().info(f'Retrying navigation ({self.retry_count}/{self.max_retries}): {self.current_tag}')
-            
-            # For retry, we need to resend the goal - this is simplified for now
-            # In a more sophisticated implementation, we could apply approach_offset here
-            # For now, we just mark as failed after max retries
-            if self.retry_count > self.max_retries:
+            # For sequence mode, don't retry - just fail and move to next action
+            if self.sequence_active:
+                if self.current_tag.startswith('sequence='):
+                    fail_msg = f'SEQUENCE:FAILED:{self.current_tag} code={error_code}'
+                else:
+                    fail_msg = f'FAILED:{self.current_tag} code={error_code}'
+                self.get_logger().warn(f'Sequence navigation failed, moving to next action: {self.current_tag}')
+                self.publish_result(fail_msg)
+            else:
+                # TODO: Implement actual retry for non-sequence navigation
                 fail_msg = f'FAILED:{self.current_tag} code={error_code}'
-                self.get_logger().error(f'Navigation failed after {self.max_retries} retries: {self.current_tag}')
+                self.get_logger().error(f'Navigation failed, no retry implemented: {self.current_tag}')
                 self.publish_result(fail_msg)
         else:
-            if self.current_tag.startswith('command='):
+            # Max retries exceeded
+            if self.current_tag.startswith('sequence='):
+                fail_msg = f'SEQUENCE:FAILED:{self.current_tag} code={error_code}'
+            elif self.current_tag.startswith('command='):
                 fail_msg = f'NAVIGATION:FAILED:{self.current_tag} code={error_code}'
             else:
                 fail_msg = f'FAILED:{self.current_tag} code={error_code}'
@@ -362,6 +386,139 @@ class TargetNavNode(Node):
         msg = String()
         msg.data = result_str
         self.result_pub.publish(msg)
+        
+        # Check if we're in sequence mode and handle next action
+        if self.sequence_active:
+            self.handle_sequence_progress(result_str)
+
+    def on_sequence_callback(self, msg):
+        """Handle sequence of comma-separated commands"""
+        # Check if a sequence is already active
+        if self.sequence_active:
+            self.get_logger().warn(f'New sequence received while sequence {self.sequence_id} is active. Interrupting current sequence.')
+            # Cancel current navigation if any
+            if self.current_goal_handle:
+                try:
+                    self.current_goal_handle.cancel_goal_async()
+                    self.get_logger().info('Cancelled current navigation goal')
+                except:
+                    pass
+        
+        # Split by comma and clean up each command
+        command_string = msg.data.strip()
+        self.action_queue = [cmd.strip() for cmd in command_string.split(',') if cmd.strip()]
+        self.current_action_index = 0
+        self.sequence_active = True
+        self.sequence_id += 1
+        self.retry_count = 0  # Reset retry count for new sequence
+        
+        self.get_logger().info(f'Starting sequence {self.sequence_id} with {len(self.action_queue)} actions')
+        self.get_logger().info(f'Commands: {self.action_queue}')
+        
+        # Publish sequence start status
+        status_msg = f'SEQUENCE:{self.sequence_id}:STARTED:{len(self.action_queue)} actions'
+        self.publish_sequence_status(status_msg)
+        
+        # Start the first action
+        self.execute_next_action()
+    
+    def execute_next_action(self):
+        """Execute the next action in the sequence"""
+        if not self.sequence_active or self.current_action_index >= len(self.action_queue):
+            self.complete_sequence()
+            return
+        
+        current_action = self.action_queue[self.current_action_index]
+        
+        # Publish sequence status
+        status_msg = f'SEQUENCE:{self.sequence_id}:EXECUTING:{self.current_action_index + 1}/{len(self.action_queue)}:"{current_action}"'
+        self.publish_sequence_status(status_msg)
+        
+        self.get_logger().info(f'Executing action {self.current_action_index + 1}/{len(self.action_queue)}: "{current_action}"')
+        
+        # Process the action using existing command processing logic
+        self.process_command_for_sequence(current_action)
+    
+    def process_command_for_sequence(self, command):
+        """Process a single command in sequence context"""
+        command = command.strip()
+        
+        # Check if it's a navigation command
+        nav_commands = self.command_map.get('navigation_commands', {})
+        if command in nav_commands:
+            target_name = nav_commands[command]
+            self.get_logger().info(f'Processing sequence navigation command: {command} -> {target_name}')
+            
+            # Use existing navigation logic
+            if target_name not in self.objects:
+                error_msg = f'SEQUENCE:FAILED:name={target_name} - object not found'
+                self.get_logger().error(f'Object "{target_name}" not found in map')
+                self.publish_result(error_msg)
+                return
+                
+            # Get object coordinates and navigate
+            obj_data = self.objects[target_name]
+            try:
+                x = float(obj_data['x'])
+                y = float(obj_data['y'])
+                yaw = float(obj_data['yaw'])
+                frame_id = obj_data.get('frame_id', 'map')
+                
+                pose = create_pose_stamped(x, y, yaw, frame_id)
+                tag = f"sequence={self.sequence_id}:action={self.current_action_index + 1}:command={command}"
+                
+                self.go_to(pose, tag)
+                
+            except (KeyError, ValueError, TypeError) as e:
+                error_msg = f'SEQUENCE:FAILED:command={command} - invalid object data: {e}'
+                self.get_logger().error(error_msg)
+                self.publish_result(error_msg)
+            return
+        
+        # Check if it's a special command
+        special_commands = self.command_map.get('special_commands', {})
+        if command in special_commands:
+            action = special_commands[command]
+            self.get_logger().info(f'Processing sequence special command: {command} -> {action}')
+            result_msg = f'SEQUENCE:SPECIAL:{action}:command={command}'
+            self.publish_result(result_msg)
+            return
+            
+        # Unknown or unsupported command - skip it
+        self.get_logger().warn(f'Skipping unsupported sequence command: "{command}"')
+        result_msg = f'SEQUENCE:SKIPPED:command={command}'
+        self.publish_result(result_msg)
+    
+    def handle_sequence_progress(self, result_str):
+        """Handle progress in sequence execution"""
+        # Check if current action succeeded, failed, or was skipped
+        if 'SUCCEEDED' in result_str or 'SKIPPED' in result_str or 'SPECIAL' in result_str:
+            # Move to next action
+            self.current_action_index += 1
+            self.execute_next_action()
+        elif 'FAILED' in result_str:
+            # For now, continue with next action even if one fails
+            self.get_logger().warn(f'Action failed, continuing with next action: {result_str}')
+            self.current_action_index += 1
+            self.execute_next_action()
+    
+    def complete_sequence(self):
+        """Complete the current sequence"""
+        self.get_logger().info(f'Sequence {self.sequence_id} completed')
+        
+        status_msg = f'SEQUENCE:{self.sequence_id}:COMPLETED:ALL:{len(self.action_queue)} actions processed'
+        self.publish_sequence_status(status_msg)
+        
+        # Reset sequence state
+        self.sequence_active = False
+        self.action_queue = []
+        self.current_action_index = 0
+    
+    def publish_sequence_status(self, status_str):
+        """Publish sequence status"""
+        msg = String()
+        msg.data = status_str
+        self.sequence_status_pub.publish(msg)
 
 
 def main(args=None):
