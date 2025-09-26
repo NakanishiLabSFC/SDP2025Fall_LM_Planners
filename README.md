@@ -14,11 +14,12 @@ ROS2 + Nav2 環境で動作する多機能ナビゲーションノードです�
 
 **特徴:**
 
-- **3 つのインターフェース**: 名前指定、座標直指定、高レベル命令
+- **4 つのインターフェース**: 名前指定、座標直指定、単一高レベル命令、シーケンス実行
 - **Nav2 統合**: NavigateToPose アクションを使用した確実なナビゲーション
 - **日本語対応**: 「ミャクミャクの椅子へ向かう」などの自然言語命令をサポート
+- **シーケンス実行**: カンマ区切りで複数コマンドを順次自動実行
 - **拡張可能設計**: ロボットアーム制御等の将来機能追加に対応
-- **エラーハンドリング**: リトライ機能と詳細なステータス通知
+- **エラーハンドリング**: 失敗時も次のアクションに継続、詳細なステータス通知
 
 **使用方法:**
 
@@ -29,10 +30,16 @@ https://github.com/TKDRYU104/navigation_utility
 # target_navノードを起動
 ros2 launch target_nav target_nav.launch.py
 
-# 高レベル日本語命令の例
+# 単一コマンド実行の例
 ros2 topic pub /robot_command_input std_msgs/String "data: 'ミャクミャクの椅子へ向かう'"
 ros2 topic pub /robot_command_input std_msgs/String "data: '抹茶の箱へ向かう'"
 ros2 topic pub /robot_command_input std_msgs/String "data: '3Dプリンターへ向かう'"
+
+# シーケンス実行の例（複数コマンドを順次実行）
+ros2 topic pub /robot_command_sequence std_msgs/String "data: 'ミャクミャクの椅子へ向かう, 3Dプリンターへ向かう, 抹茶の箱へ向かう'" --once
+
+# シーケンス状況の確認
+ros2 topic echo /sequence_status
 ```
 
 詳細なドキュメントは [src/target_nav/README.md](src/target_nav/README.md) を参照してください。
